@@ -9,6 +9,10 @@ venv/
 ENV/
 build/
 dist/
+DEPLOY.md
+deploy.sh
+template.yaml
+lambda-package/
 *.egg-info/
 
 # Ambiente
