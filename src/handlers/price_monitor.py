@@ -82,6 +82,11 @@ def lambda_handler(event, context):
         # === ESTRATÉGIA 3: Topos e Fundos Históricos ===
         if ALERT_STRATEGY in ['records', 'both']:
             stats_data = get_stats(S3_BUCKET, symbol)
+            
+            # Guarda valores ANTES de atualizar
+            previous_high = stats_data.get('all_time_high', 0)
+            previous_low = stats_data.get('all_time_low', float('inf'))
+            
             updated_stats, is_new_high, is_new_low = update_records(stats_data, price)
             
             if is_new_high:
@@ -89,14 +94,15 @@ def lambda_handler(event, context):
                 send_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
                              f"🚀 *RECORDE {symbol}*\n"
                              f"Novo topo histórico: `${price:,.2f}`\n"
-                             f"Anterior: `${stats_data.get('all_time_high', 0):,.2f}`")
+                             f"Anterior: `${previous_high:,.2f}`")
             
             if is_new_low:
                 print(f"   📉 NOVO FUNDO HISTÓRICO!")
+                previous_low_display = "N/A" if previous_low == float('inf') else f"${previous_low:,.2f}"
                 send_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
                              f"📉 *FUNDO {symbol}*\n"
                              f"Menor preço histórico: `${price:,.2f}`\n"
-                             f"Anterior: `${stats_data.get('all_time_low', float('inf')):,.2f}`")
+                             f"Anterior: `{previous_low_display}`")
             
             # Salva estatísticas atualizadas
             if is_new_high or is_new_low:
