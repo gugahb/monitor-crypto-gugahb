@@ -15,6 +15,11 @@ TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 ALERTS = os.environ.get("ALERTS", "")
 VARIATION_ALERTS = os.environ.get("VARIATION_ALERTS", "")
 
+ALERT_STRATEGY = os.environ.get("ALERT_STRATEGY", "both")  # moving_average, records, both
+HISTORY_DAYS = int(os.environ.get("HISTORY_DAYS", "7"))
+MOVING_AVERAGE_HOURS = int(os.environ.get("MOVING_AVERAGE_HOURS", "24"))
+STDDEV_THRESHOLD = float(os.environ.get("STDDEV_THRESHOLD", "2.0"))
+
 def parse_alerts(raw: str):
     if not raw:
         return {}
