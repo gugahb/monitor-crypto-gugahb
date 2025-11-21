@@ -15,16 +15,26 @@ else:
 LOCAL_CACHE_FILE = Path("/tmp/last_prices.json") if ENABLE_S3 else Path("local_data/last_prices.json")
 LOCAL_HISTORY_DIR = Path("/tmp") if ENABLE_S3 else Path("local_data")
 
-def save_price_to_history(bucket, symbol, price, ts):
-    """Salva preço no histórico móvel (janela de N dias)."""
+def save_price_to_history(bucket, symbol, price, volume, ts):
+    """
+    Salva preço E volume no histórico móvel (janela de N dias).
+    
+    Args:
+        bucket: Nome do bucket S3
+        symbol: Símbolo da moeda
+        price: Preço atual
+        volume: Volume atual
+        ts: Timestamp
+    """
     key = f"history/{symbol}.json"
     
     # Busca histórico existente
     history = get_price_history(bucket, symbol)
     
-    # Adiciona novo registro
+    # Adiciona novo registro COM VOLUME
     history.append({
         "price": price,
+        "volume": volume,
         "timestamp": ts
     })
     
@@ -47,7 +57,7 @@ def save_price_to_history(bucket, symbol, price, ts):
         )
         print(f"💾 Histórico S3 atualizado: {len(history)} registros")
     
-    # Atualiza cache rápido
+    # Atualiza cache rápido (apenas preço para compatibilidade)
     _save_to_local_cache(symbol, price, ts)
 
 def get_price_history(bucket, symbol):

@@ -1,17 +1,20 @@
-# 🪙 Crypto Price Monitor – Análise Estatística + Alertas Inteligentes
+# 🪙 Crypto Price Monitor – Análise Estatística + Alertas Inteligentes com Contexto Temporal
 
-Monitoramento avançado de preços de criptomoedas com **3 estratégias de alerta**:
+Monitoramento avançado de preços de criptomoedas com **análise combinada de preço + volume** e **contexto temporal inteligente**:
 
-- 📊 **Média Móvel + Desvio Padrão** - Detecta anomalias estatísticas
-- 🚀 **Recordes Históricos** - Alerta em novos topos/fundos
-- 📈 **Variação Simples** - Alertas de mudança percentual
+- 📊 **Anomalia Confirmada** - Preço ≥2σ + Volume ≥1σ (probabilidade ~0,8%)
+- 🚀 **Evento Extremo** - Preço ≥3σ independente de volume (~0,3%)
+- ⚡ **Pré-Movimento** - Volume ≥2σ com preço estável (acumulação)
+- 🎯 **Contexto Temporal** - Tendência, ATL/ATH recente, higher lows, momentum
+- 🏆 **Recordes Históricos** - Novos topos/fundos (ATH/ATL)
+- 📈 **Variação Simples** - Mudança >5% desde último candle
 
 **Stack:**
 - AWS Lambda (Python 3.11)
 - EventBridge (cron a cada 5 min)
-- S3 (histórico de 7 dias + estatísticas)
-- Telegram (notificações)
-- CoinGecko API (preços sem bloqueio geográfico)
+- S3 (histórico 7 dias + estatísticas + estado de alertas)
+- Telegram (notificações com contexto rico)
+- CoinGecko API (preço + volume 24h, sem bloqueio geográfico)
 
 ---
 
@@ -26,6 +29,12 @@ pip install -r requirements.txt
 Edite `.env`:
 - `TELEGRAM_BOT_TOKEN` - crie com [@BotFather](https://t.me/botfather)
 - `TELEGRAM_CHAT_ID` - obtenha com [@userinfobot](https://t.me/userinfobot)
+
+**Exemplo:**
+```env
+TELEGRAM_BOT_TOKEN=1234567890:AMNOpqrsTUVwxyz
+TELEGRAM_CHAT_ID=123456789
+```
 
 ### 3. Executar
 ```bash
@@ -42,48 +51,98 @@ Busca preços reais e salva em `local_data/` 🎯
 
 ```env
 # Básicas
-S3_BUCKET=crypto-price-monitor-logs-gugahb
+S3_BUCKET=seu-bucket-crypto-monitor
 SYMBOLS=BTCUSDT,ETHUSDT,SOLUSDT
-TELEGRAM_BOT_TOKEN=seu_token
-TELEGRAM_CHAT_ID=seu_chat_id
+TELEGRAM_BOT_TOKEN=12347890:ABCdeOpqrsTUVwxyz
+TELEGRAM_CHAT_ID=123789
 
 # Estratégias de alerta
 ALERT_STRATEGY=both                # moving_average, records, both
 VARIATION_ALERTS=BTCUSDT:3,ETHUSDT:4,SOLUSDT:5
 
-# Análise estatística
-HISTORY_DAYS=7                     # Janela móvel
-MOVING_AVERAGE_HOURS=24            # Período para média
-STDDEV_THRESHOLD=2.0               # Sensibilidade (2σ)
+# Análise estatística de preço
+HISTORY_DAYS=7                     # Janela móvel (7 dias)
+MOVING_AVERAGE_HOURS=24            # Período para média (24h)
+STDDEV_THRESHOLD=2.0               # Threshold z-score preço (2σ = 95%)
+
+# Análise de volume (redução de falsos positivos)
+MIN_VOLUME_Z=1.0                   # Mínimo z-score volume para confirmar (1σ = 84%)
+EXTREME_THRESHOLD=3.0              # Threshold eventos extremos (3σ = 99.7%)
+ALERT_COOLDOWN_MINUTES=30          # Cooldown entre alertas (30 min = 6 execuções)
 
 # Operação
-ENABLE_S3=false                    # true na AWS
+ENABLE_S3=false                    # true na AWS, false local
 ```
+
+**Total: 12 variáveis** (9 originais + 3 de volume)
 
 ---
 
 ## 📊 Estratégias de Alerta
 
-### 1. Variação Simples (Legado)
-Alerta quando preço varia ±X% desde última leitura:
+### 1. Anomalia Confirmada (Preço + Volume)
+**Regra:** |price_z| ≥ 2σ AND volume_z ≥ 1σ  
+**Probabilidade:** ~0,8% (altamente confiável)
+
 ```
-BTC: ±3% | ETH: ±4% | SOL: ±5%
+📈 ANOMALIA CONFIRMADA
+Preço: $95,000 (+2.3σ)
+Volume: $1.2B (+1.8σ)
+Movimento de alta com volume elevado
+Média preço: $92,000 (±$1,200)
+
+📊 Contexto:
+📈 Tendência: 75% alta (últimos 60min)
+🔄 Saindo de ATL (há 45min)
+✅ Higher lows confirmados (reversão de alta)
+⚡ Momentum strong: +5.2%
 ```
 
-### 2. Média Móvel + Desvio Padrão
-Detecta anomalias estatísticas usando últimas 24h:
+### 2. Evento Extremo
+**Regra:** |price_z| ≥ 3σ (independente de volume)  
+**Probabilidade:** ~0,3% (raríssimo)
+
 ```
-⚠️ Anomalia BTC
-Preço $95,000 está 2.3σ acima da média
-Média 24h: $92,000 (±$1,200)
+💥 EVENTO EXTREMO
+Preço: $88,200 (-3.5σ)
+QUEDA EXTREMA detectada!
+Média: $92,000 (±$1,100)
+Volume: $1.2B (+0.8σ)
+
+📊 Contexto:
+📉 Tendência: 30% alta (últimos 60min)
+⚠️ Lower highs confirmados (continuação de baixa)
 ```
 
-### 3. Recordes Históricos
+### 3. Pré-Movimento (Volume Spike)
+**Regra:** volume_z ≥ 2σ AND |price_z| < 2σ  
+**Probabilidade:** ~2,5% (acumulação/distribuição)
+
+```
+⚡ PRÉ-MOVIMENTO DETECTADO
+Volume spike: $450M (+2.3σ)
+Preço ainda estável: $3,100 (+0.5σ)
+Possível reversão ou movimento iminente
+
+📊 Contexto:
+📈 Tendência: 65% alta (últimos 60min)
+✅ Higher lows confirmados
+```
+
+### 4. Recordes Históricos (ATH/ATL)
 Alerta em novos topos ou fundos:
 ```
-🚀 RECORDE BTC
+🚀 RECORDE BTCUSDT
 Novo topo histórico: $98,500
 Anterior: $96,200
+```
+
+### 5. Variação Simples (Legado)
+Alerta quando preço varia ±X% desde última leitura:
+```
+📈 Variação SOLUSDT
+Preço subiu: +5.3%
+De $130.00 para $136.89
 ```
 
 ---
@@ -93,14 +152,24 @@ Anterior: $96,200
 ```
 bucket/
 ├── history/
-│   ├── BTCUSDT.json      # Janela móvel 7 dias (~2k registros)
+│   ├── BTCUSDT.json      # [{price, volume, timestamp}, ...] - 7 dias
 │   ├── ETHUSDT.json
 │   └── SOLUSDT.json
-└── stats/
-    ├── BTCUSDT.json      # {all_time_high, all_time_low}
+├── stats/
+│   ├── BTCUSDT.json      # {all_time_high, all_time_low, last_ath_timestamp, last_atl_timestamp}
+│   ├── ETHUSDT.json
+│   └── SOLUSDT.json
+└── alert_state/
+    ├── BTCUSDT.json      # {last_alert_ts, last_price_z, last_volume_z}
     ├── ETHUSDT.json
     └── SOLUSDT.json
 ```
+
+**Volumes:**
+- history: ~2.000 registros/símbolo (5min × 12/h × 24h × 7d)
+- stats: 4 campos por símbolo
+- alert_state: 3 campos por símbolo
+- **Total:** ~10 MB para 3 símbolos
 
 ---
 
@@ -108,17 +177,28 @@ bucket/
 
 ```
 src/
-├── main.py                          # Entry point
+├── main.py                          # Entry point (local)
 ├── handlers/
-│   └── price_monitor.py             # Lambda handler + lógica
+│   └── price_monitor.py             # Lambda handler + orquestração
 ├── config/
-│   ├── settings.py                  # Variáveis de ambiente
+│   ├── settings.py                  # Variáveis de ambiente (12 vars)
 │   └── services/
-│       ├── binance_service.py       # API CoinGecko
-│       ├── s3_service.py            # Histórico + stats
-│       ├── telegram_service.py      # Notificações
-│       └── statistics.py            # Média, σ, z-score
+│       ├── binance_service.py       # CoinGecko API (preço + volume)
+│       ├── s3_service.py            # Persistência (history/stats/alert_state)
+│       ├── telegram_service.py      # Notificações Telegram
+│       ├── statistics.py            # Análise estatística + contexto temporal
+│       └── alert_state.py           # Cooldown management
 ```
+
+**Fluxo de Execução:**
+1. EventBridge aciona Lambda a cada 5 min
+2. `price_monitor.py` busca preço + volume (CoinGecko)
+3. Salva histórico no S3 (janela móvel 7 dias)
+4. Calcula estatísticas: μ, σ, z-scores (preço e volume)
+5. **NOVO:** Calcula contexto temporal (trend, recency, patterns, momentum)
+6. Avalia 3 regras de alerta com cooldown de 30 min
+7. Envia mensagem Telegram com contexto rico
+8. Atualiza alert_state e stats no S3
 
 ---
 
@@ -134,10 +214,16 @@ Ver [DEPLOY.md](DEPLOY.md) para instruções completas.
 # 2. Upload na Lambda
 # Console AWS → Lambda → crypto-price-monitor → Upload .zip
 
-# 3. Configurar 9 variáveis de ambiente
+# 3. Configurar 12 variáveis de ambiente (9 originais + 3 volume)
 
 # 4. EventBridge cron: */5 * * * ? *
 ```
+
+**Variáveis obrigatórias:**
+- S3_BUCKET, SYMBOLS, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+- ALERT_STRATEGY, VARIATION_ALERTS
+- HISTORY_DAYS, MOVING_AVERAGE_HOURS, STDDEV_THRESHOLD
+- MIN_VOLUME_Z, EXTREME_THRESHOLD, ALERT_COOLDOWN_MINUTES
 
 ---
 
@@ -181,8 +267,20 @@ grep "ALERTA\|ANOMALIA\|RECORDE" logs.txt
 
 ## 📚 Documentação
 
-- [DEPLOY.md](DEPLOY.md) - Guia completo de deploy
-- [src/config/services/statistics.py](src/config/services/statistics.py) - Cálculos estatísticos
+- **[DEPLOY.md](DEPLOY.md)** - Guia completo de deploy AWS
+- **[CONTEXT_ANALYSIS.md](CONTEXT_ANALYSIS.md)** - Análise de contexto temporal (trend, recency, patterns, momentum)
+- **[cenarios_possiveis.md](cenarios_possiveis.md)** - 12 cenários de alerta com interpretações
+- **[statistics.py](src/config/services/statistics.py)** - Funções estatísticas e análise temporal
+
+### 🎓 Conceitos Importantes
+- **Z-score:** Normaliza valores de ativos diferentes (BTC $90k vs SOL $130)
+- **2σ:** 95% de confiança (só 5% de chance natural)
+- **3σ:** 99,7% de confiança (evento extremo)
+- **Volume confirmation:** Reduz falsos positivos de ~5% para ~0,8%
+- **Cooldown:** Evita spam (30 min = 6 execuções)
+- **Trend Score:** % de movimentos positivos (60 min)
+- **Higher Lows:** Fundos crescentes = reversão de alta
+- **Momentum:** Taxa de mudança 1h (strong >3%)
 
 ---
 
