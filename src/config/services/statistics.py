@@ -174,14 +174,12 @@ def evaluate_combined_anomaly(
     alert_message = ""
     current_ts = time.time()
     
-    # Cooldown: não alertar se último alerta foi há menos de N minutos
     last_alert_ts = alert_state.get('last_alert_ts', 0)
-    time_since_last = (current_ts - last_alert_ts) / 60  # minutos
+    time_since_last = (current_ts - last_alert_ts) / 60 
     
     if time_since_last < cooldown_minutes:
         return False, "", alert_state
     
-    # REGRA 1: Preço >= 2σ + Volume confirmado
     if abs(price_z) >= 2.0 and volume_z >= min_volume_z:
         direction = "alta" if price_z > 0 else "baixa"
         emoji = "📈" if price_z > 0 else "📉"
@@ -195,7 +193,6 @@ def evaluate_combined_anomaly(
         )
         should_alert = True
     
-    # REGRA 2: Preço >= 3σ (extremo) - alerta mesmo sem volume
     elif abs(price_z) >= extreme_threshold:
         direction = "ALTA EXTREMA" if price_z > 0 else "QUEDA EXTREMA"
         emoji = "🚀" if price_z > 0 else "💥"
@@ -209,7 +206,6 @@ def evaluate_combined_anomaly(
         )
         should_alert = True
     
-    # REGRA 3: Volume spike >= 2σ sem movimento de preço ainda
     elif volume_z >= 2.0 and abs(price_z) < 2.0:
         alert_message = (
             f"⚡ *PRÉ-MOVIMENTO DETECTADO*\n"
@@ -219,7 +215,6 @@ def evaluate_combined_anomaly(
         )
         should_alert = True
     
-    # Atualiza estado se alertou
     new_state = alert_state.copy()
     if should_alert:
         new_state['last_alert_ts'] = current_ts
@@ -277,7 +272,6 @@ def filter_recent_history(history: List[Dict], hours: int) -> List[Dict]:
     if not history:
         return []
     
-    # Pega timestamp mais recente
     latest_ts = max(h['timestamp'] for h in history)
     cutoff_ts = latest_ts - (hours * 3600)
     
@@ -312,7 +306,6 @@ def calculate_trend_score(history: List[Dict], minutes: int = 60) -> Dict:
             'trend_direction': 'neutral'
         }
     
-    # Filtra últimos N minutos
     recent = filter_recent_history(history, minutes / 60)
     
     if len(recent) < 2:
@@ -325,10 +318,8 @@ def calculate_trend_score(history: List[Dict], minutes: int = 60) -> Dict:
             'trend_direction': 'neutral'
         }
     
-    # Ordena por timestamp
     sorted_history = sorted(recent, key=lambda x: x['timestamp'])
     
-    # Conta movimentos
     positive = 0
     negative = 0
     neutral = 0
@@ -347,7 +338,6 @@ def calculate_trend_score(history: List[Dict], minutes: int = 60) -> Dict:
     total = positive + negative + neutral
     positive_pct = (positive / total * 100) if total > 0 else 0.0
     
-    # Determina direção (threshold: 60%)
     if positive_pct >= 60:
         direction = 'bullish'
     elif positive_pct <= 40:
@@ -428,7 +418,6 @@ def detect_higher_lows(history: List[Dict], minutes: int = 60, min_points: int =
             'pattern': 'neutral'
         }
     
-    # Filtra últimos N minutos
     recent = filter_recent_history(history, minutes / 60)
     
     if len(recent) < min_points * 2:
@@ -440,11 +429,9 @@ def detect_higher_lows(history: List[Dict], minutes: int = 60, min_points: int =
             'pattern': 'neutral'
         }
     
-    # Ordena por timestamp
     sorted_history = sorted(recent, key=lambda x: x['timestamp'])
     prices = [h['price'] for h in sorted_history]
     
-    # Divide em chunks para encontrar mínimos e máximos locais
     chunk_size = max(3, len(prices) // min_points)
     lows = []
     highs = []
@@ -455,11 +442,9 @@ def detect_higher_lows(history: List[Dict], minutes: int = 60, min_points: int =
             lows.append(min(chunk))
             highs.append(max(chunk))
     
-    # Verifica padrões
     has_higher_lows = len(lows) >= min_points and all(lows[i] < lows[i+1] for i in range(len(lows)-1))
     has_lower_highs = len(highs) >= min_points and all(highs[i] > highs[i+1] for i in range(len(highs)-1))
     
-    # Determina padrão
     if has_higher_lows and not has_lower_highs:
         pattern = 'bullish_reversal'
     elif has_lower_highs and not has_higher_lows:
@@ -470,8 +455,8 @@ def detect_higher_lows(history: List[Dict], minutes: int = 60, min_points: int =
     return {
         'has_higher_lows': has_higher_lows,
         'has_lower_highs': has_lower_highs,
-        'lows': lows[-3:] if lows else [],  # Últimos 3 fundos
-        'highs': highs[-3:] if highs else [],  # Últimos 3 topos
+        'lows': lows[-3:] if lows else [], 
+        'highs': highs[-3:] if highs else [], 
         'pattern': pattern
     }
 
@@ -502,7 +487,6 @@ def calculate_momentum(history: List[Dict], minutes: int = 60) -> Dict:
             'price_end': 0.0
         }
     
-    # Filtra últimos N minutos
     recent = filter_recent_history(history, minutes / 60)
     
     if len(recent) < 2:
@@ -514,16 +498,13 @@ def calculate_momentum(history: List[Dict], minutes: int = 60) -> Dict:
             'price_end': 0.0
         }
     
-    # Ordena por timestamp
     sorted_history = sorted(recent, key=lambda x: x['timestamp'])
     
     price_start = sorted_history[0]['price']
     price_end = sorted_history[-1]['price']
     
-    # Calcula taxa de mudança
     rate = ((price_end - price_start) / price_start * 100) if price_start > 0 else 0.0
     
-    # Determina direção e força
     if rate > 1:
         direction = 'positive'
         strength = 'strong' if rate > 3 else 'moderate'
@@ -541,6 +522,67 @@ def calculate_momentum(history: List[Dict], minutes: int = 60) -> Dict:
         'price_start': price_start,
         'price_end': price_end
     }
+
+
+def calculate_rsi(prices, period=14):
+    """
+    Calcula o RSI (Relative Strength Index) para uma lista de preços.
+    
+    Args:
+        prices (list): Lista de preços (float), ordenados do mais antigo para o mais recente.
+        period (int): Período para cálculo (padrão 14).
+        
+    Returns:
+        float: Valor do RSI (0-100) ou None se dados insuficientes.
+    """
+    if len(prices) < period + 1:
+        return None
+        
+    deltas = [prices[i] - prices[i-1] for i in range(1, len(prices))]
+    
+    gains = [d for d in deltas if d > 0]
+    losses = [-d for d in deltas if d < 0]
+    
+    avg_gain = sum(gains) / period if gains else 0
+    avg_loss = sum(losses) / period if losses else 0
+    
+    if avg_loss == 0:
+        return 100.0
+        
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+    
+    return rsi
+
+def calculate_vwap(history, period_hours=1):
+    """
+    Calcula o VWAP (Volume Weighted Average Price).
+    
+    Args:
+        history (list): Lista de dicts {price, volume, timestamp}.
+        period_hours (int): Janela de tempo em horas.
+        
+    Returns:
+        float: Valor do VWAP ou None.
+    """
+    if not history:
+        return None
+        
+    now = history[-1]['timestamp']
+    start_time = now - (period_hours * 3600)
+    
+    relevant_data = [h for h in history if h['timestamp'] >= start_time]
+    
+    if not relevant_data:
+        return None
+        
+    total_pv = sum(h['price'] * h['volume'] for h in relevant_data)
+    total_volume = sum(h['volume'] for h in relevant_data)
+    
+    if total_volume == 0:
+        return None
+        
+    return total_pv / total_volume
 
 
 def detect_sideways_movement(history: List[Dict], minutes: int = 60, threshold_pct: float = 1.0) -> Dict:
@@ -574,10 +616,9 @@ def detect_sideways_movement(history: List[Dict], minutes: int = 60, threshold_p
             'sample_count': 0
         }
     
-    # Filtra últimos N minutos
     recent = filter_recent_history(history, minutes / 60)
     
-    if len(recent) < 6:  # Mínimo 6 pontos (30 min com coleta de 5 em 5)
+    if len(recent) < 6: 
         return {
             'is_sideways': False,
             'volatility_pct': 0.0,
@@ -588,23 +629,18 @@ def detect_sideways_movement(history: List[Dict], minutes: int = 60, threshold_p
             'sample_count': len(recent)
         }
     
-    # Ordena por timestamp
     sorted_history = sorted(recent, key=lambda x: x['timestamp'])
     prices = [h['price'] for h in sorted_history]
     
-    # Calcula range de preço
     price_min = min(prices)
     price_max = max(prices)
     price_avg = sum(prices) / len(prices)
     price_range = price_max - price_min
     
-    # Calcula volatilidade como % do preço médio
     volatility_pct = (price_range / price_avg * 100) if price_avg > 0 else 0.0
     
-    # Calcula duração
     duration_minutes = (sorted_history[-1]['timestamp'] - sorted_history[0]['timestamp']) / 60
     
-    # Considera lateral se volatilidade < threshold
     is_sideways = volatility_pct < threshold_pct
     
     return {
@@ -657,17 +693,13 @@ def detect_breakout(
     price_min = sideways_data['price_min']
     price_avg = (price_max + price_min) / 2
     
-    # Calcula distância do preço atual em relação à lateral
     if current_price > price_max:
-        # Rompimento para cima
         breakout_pct = ((current_price - price_max) / price_avg * 100)
         direction = 'up'
     elif current_price < price_min:
-        # Rompimento para baixo
         breakout_pct = ((price_min - current_price) / price_avg * 100)
         direction = 'down'
     else:
-        # Ainda dentro da lateral
         return {
             'is_breakout': False,
             'direction': 'none',
@@ -676,13 +708,10 @@ def detect_breakout(
             'breakout_type': 'none'
         }
     
-    # Verifica se rompimento é significativo
     is_breakout = breakout_pct >= min_breakout_pct
     
-    # Verifica confirmação por volume
     volume_confirmed = volume_z >= min_volume_z
     
-    # Classifica tipo de rompimento
     if is_breakout and volume_confirmed:
         breakout_type = 'confirmed'
     elif is_breakout and not volume_confirmed:

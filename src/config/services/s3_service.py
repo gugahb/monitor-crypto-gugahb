@@ -28,21 +28,17 @@ def save_price_to_history(bucket, symbol, price, volume, ts):
     """
     key = f"history/{symbol}.json"
     
-    # Busca histórico existente
     history = get_price_history(bucket, symbol)
     
-    # Adiciona novo registro COM VOLUME
     history.append({
         "price": price,
         "volume": volume,
         "timestamp": ts
     })
     
-    # Filtra para manter apenas últimos N dias
     cutoff_ts = ts - (HISTORY_DAYS * 24 * 3600)
     history = [h for h in history if h['timestamp'] >= cutoff_ts]
     
-    # Salva histórico atualizado
     if not ENABLE_S3:
         local_file = LOCAL_HISTORY_DIR / f"{symbol}_history.json"
         LOCAL_HISTORY_DIR.mkdir(parents=True, exist_ok=True)
@@ -57,7 +53,6 @@ def save_price_to_history(bucket, symbol, price, volume, ts):
         )
         print(f"💾 Histórico S3 atualizado: {len(history)} registros")
     
-    # Atualiza cache rápido (apenas preço para compatibilidade)
     _save_to_local_cache(symbol, price, ts)
 
 def get_price_history(bucket, symbol):

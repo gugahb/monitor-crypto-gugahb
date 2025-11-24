@@ -15,9 +15,14 @@ from src.config.services.statistics import (
     get_price_statistics, get_volume_statistics, check_anomaly, 
     evaluate_combined_anomaly, update_records, filter_recent_history,
     calculate_trend_score, check_record_recency, detect_higher_lows, calculate_momentum,
-    detect_sideways_movement, detect_breakout
+    detect_sideways_movement, detect_breakout,
+    calculate_rsi, calculate_vwap
 )
 from src.config.services.alert_state import get_alert_state, save_alert_state
+from src.config.services.sentiment_service import get_sentiment_data, calculate_pump_score
+
+
+
 
 def lambda_handler(event, context):
     ts = time.time()
@@ -39,13 +44,10 @@ def lambda_handler(event, context):
                          f"⚠️ Erro ao buscar {symbol}: {e}")
             continue
 
-        # Busca último preço (cache rápido)
         last_data = get_last_price(S3_BUCKET, symbol)
         
-        # Salva novo preço E volume no histórico móvel
         save_price_to_history(S3_BUCKET, symbol, price, volume, ts)
         
-        # === ESTRATÉGIA 1: Variação simples (mantém compatibilidade) ===
         if symbol in VARIATION_DICT and last_data:
             variation_threshold = VARIATION_DICT[symbol]
             last_price = last_data['price']
@@ -62,7 +64,6 @@ def lambda_handler(event, context):
                              f"Preço {direction}: `{variation:+.2f}%`\n"
                              f"De `${last_price:,.2f}` para `${price:,.2f}`")
         
-        # === ESTRATÉGIA 2: Análise Combinada (Preço + Volume) ===
         if ALERT_STRATEGY in ['moving_average', 'both']:
             history = get_price_history(S3_BUCKET, symbol)
             
@@ -70,42 +71,33 @@ def lambda_handler(event, context):
                 recent = filter_recent_history(history, MOVING_AVERAGE_HOURS)
                 
                 if len(recent) >= 10:
-                    # Calcula estatísticas de preço E volume
                     price_stats = get_price_statistics(recent)
                     volume_stats = get_volume_statistics(recent)
                     
-                    # Calcula z-scores
                     _, price_z = check_anomaly(price, price_stats['mean'], price_stats['std_dev'], 2.0)
                     _, volume_z = check_anomaly(volume, volume_stats['mean'], volume_stats['std_dev'], 1.5)
                     
                     print(f"   📈 Média preço {MOVING_AVERAGE_HOURS}h: ${price_stats['mean']:,.2f} (±${price_stats['std_dev']:,.2f})")
                     print(f"   📊 Preço z-score: {price_z:+.2f}σ | Volume z-score: {volume_z:+.2f}σ")
                     
-                    # === NOVA ANÁLISE DE CONTEXTO ===
-                    # 1. Trend Score (últimos 60 min)
                     trend = calculate_trend_score(history, minutes=60)
                     print(f"   📊 Tendência 1h: {trend['positive_percentage']:.0f}% positivo ({trend['trend_direction']})")
                     
-                    # 2. ATH/ATL Recency
                     stats_data = get_stats(S3_BUCKET, symbol)
                     recency = check_record_recency(stats_data, ts, window_hours=2)
                     
-                    # 3. Higher Lows / Lower Highs
                     pattern = detect_higher_lows(history, minutes=60)
                     if pattern['pattern'] != 'neutral':
                         print(f"   🔍 Padrão: {pattern['pattern']}")
                     
-                    # 4. Momentum
                     momentum = calculate_momentum(history, minutes=60)
                     if momentum['strength'] != 'weak':
                         print(f"   ⚡ Momentum: {momentum['rate_of_change']:+.2f}% ({momentum['strength']})")
                     
-                    # 5. Lateralização (Sideways Movement)
                     sideways = detect_sideways_movement(history, minutes=60, threshold_pct=SIDEWAYS_THRESHOLD)
                     if sideways['is_sideways']:
                         print(f"   ⏸️  Lateral: {sideways['volatility_pct']:.2f}% oscilação, {sideways['duration_minutes']:.0f}min")
                     
-                    # 6. Rompimento (Breakout)
                     breakout = detect_breakout(
                         current_price=price,
                         sideways_data=sideways,
@@ -114,26 +106,21 @@ def lambda_handler(event, context):
                         min_volume_z=MIN_VOLUME_Z
                     )
                     
-                    # Busca estado de alertas anterior
                     alert_state = get_alert_state(S3_BUCKET, symbol)
                     
-                    # === LÓGICA DE LATERALIZAÇÃO E BREAKOUT ===
                     current_ts = ts
                     was_sideways = alert_state.get('was_sideways', False)
                     sideways_start_ts = alert_state.get('sideways_start_ts', 0)
                     last_sideways_alert_ts = alert_state.get('last_sideways_alert_ts', 0)
                     
-                    # Detecta início de lateralização
                     if sideways['is_sideways'] and not was_sideways:
                         sideways_start_ts = current_ts
                         print(f"   🔔 Início de lateralização detectado")
                     
-                    # Detecta fim de lateralização (breakout ou retorno à oscilação)
                     if was_sideways and not sideways['is_sideways']:
                         sideways_duration = (current_ts - sideways_start_ts) / 60
                         
                         if breakout['is_breakout']:
-                            # ROMPIMENTO DETECTADO
                             direction_emoji = "📈" if breakout['direction'] == 'up' else "📉"
                             direction_text = "ALTA" if breakout['direction'] == 'up' else "BAIXA"
                             
@@ -145,7 +132,7 @@ def lambda_handler(event, context):
                                     f"Estava lateral há: {sideways_duration:.0f} minutos\n"
                                     f"\n✅ *Ação:* ENTRADA VÁLIDA (breakout confirmado)"
                                 )
-                            else:  # weak breakout
+                            else: 
                                 alert_msg = (
                                     f"⚠️ *Rompimento SEM volume*\n"
                                     f"Preço: `${price:,.2f}` ({breakout['breakout_pct']:+.1f}%)\n"
@@ -154,7 +141,6 @@ def lambda_handler(event, context):
                                     f"\n💡 *Ação:* NÃO entrar (possível bull/bear trap)"
                                 )
                             
-                            # Adiciona contexto
                             context_lines = []
                             if trend['trend_direction'] == 'bullish':
                                 context_lines.append(f"📈 Tendência: {trend['positive_percentage']:.0f}% alta")
@@ -174,17 +160,14 @@ def lambda_handler(event, context):
                         else:
                             print(f"   🔄 Fim de lateralização (voltou a oscilar normalmente)")
                         
-                        # Reseta estado de lateralização
                         alert_state['was_sideways'] = False
                         alert_state['sideways_start_ts'] = 0
                         alert_state['last_sideways_alert_ts'] = 0
                     
-                    # Durante lateralização: alerta periódico
                     elif sideways['is_sideways']:
                         sideways_duration = (current_ts - sideways_start_ts) / 60 if sideways_start_ts > 0 else 0
                         time_since_last_sideways_alert = (current_ts - last_sideways_alert_ts) / 60 if last_sideways_alert_ts > 0 else 999
                         
-                        # Alerta se: duração >= mínimo E intervalo >= configurado
                         if sideways_duration >= SIDEWAYS_MIN_DURATION and time_since_last_sideways_alert >= SIDEWAYS_ALERT_INTERVAL:
                             alert_msg = (
                                 f"⏸️ *LATERALIZAÇÃO DETECTADA*\n"
@@ -199,21 +182,15 @@ def lambda_handler(event, context):
                             
                             alert_state['last_sideways_alert_ts'] = current_ts
                         
-                        # Atualiza estado
                         alert_state['was_sideways'] = True
                         if sideways_start_ts == 0:
                             alert_state['sideways_start_ts'] = current_ts
                         
-                        # Salva estado
                         save_alert_state(S3_BUCKET, symbol, alert_state)
                         
-                        # PULA ALERTAS NORMAIS durante lateralização
                         print(f"   ⏸️  Alertas normais pausados (em lateralização)")
-                        continue  # Pula para próximo símbolo
+                        continue  
                     
-                    # === ALERTAS NORMAIS (apenas se NÃO estiver lateral) ===
-                    
-                    # Avalia anomalia combinada (NOVA LÓGICA INTELIGENTE)
                     should_alert, alert_msg, new_state = evaluate_combined_anomaly(
                         price_z=price_z,
                         volume_z=volume_z,
@@ -232,33 +209,27 @@ def lambda_handler(event, context):
                     if should_alert:
                         print(f"   🚨 ALERTA COMBINADO!")
                         
-                        # Monta contexto adicional para alerta
                         context_lines = []
                         
-                        # Contexto de Tendência
                         if trend['trend_direction'] == 'bullish':
                             context_lines.append(f"📈 Tendência: {trend['positive_percentage']:.0f}% alta (últimos 60min)")
                         elif trend['trend_direction'] == 'bearish':
                             context_lines.append(f"📉 Tendência: {trend['positive_percentage']:.0f}% baixa (últimos 60min)")
                         
-                        # Contexto de ATH/ATL recente
                         if recency['atl_recent']:
                             context_lines.append(f"🔄 Saindo de ATL (há {recency['atl_minutes_ago']:.0f}min)")
                         elif recency['ath_recent']:
                             context_lines.append(f"🔄 Saindo de ATH (há {recency['ath_minutes_ago']:.0f}min)")
                         
-                        # Contexto de Padrões
                         if pattern['pattern'] == 'bullish_reversal':
                             context_lines.append(f"✅ Higher lows confirmados (reversão de alta)")
                         elif pattern['pattern'] == 'bearish_continuation':
                             context_lines.append(f"⚠️ Lower highs confirmados (continuação de baixa)")
                         
-                        # Contexto de Momentum
                         if momentum['strength'] != 'weak':
                             emoji_mom = "⚡" if momentum['direction'] == 'positive' else "⚡"
                             context_lines.append(f"{emoji_mom} Momentum {momentum['strength']}: {momentum['rate_of_change']:+.2f}%")
                         
-                        # Adiciona contexto ao alerta
                         if context_lines:
                             context_section = "\n\n📊 *Contexto:*\n" + "\n".join(context_lines)
                             alert_msg += context_section
@@ -267,8 +238,59 @@ def lambda_handler(event, context):
                         save_alert_state(S3_BUCKET, symbol, new_state)
                     else:
                         print(f"   ✅ Normal ou em cooldown")
+
+                    if abs(price_z) >= 1.5 or volume_z >= 1.0:
+                        print(f"   🤖 Iniciando análise de sentimento (CoinGecko)...")
+                        
+                        rsi = calculate_rsi([h['price'] for h in recent])
+                        vwap = calculate_vwap(recent, period_hours=1)
+                        
+                        tech_metrics = {
+                            "volume_change_1h": 0, 
+                            "rsi": rsi if rsi else 50
+                        }
+                        
+                        sentiment_data = get_sentiment_data(symbol, previous_volume=volume_stats['mean'])
+                        
+                        pump_analysis = calculate_pump_score(sentiment_data, tech_metrics)
+                        
+                        if pump_analysis:
+                            score = pump_analysis.get('score_pump_15_60min', 0)
+                            reason = pump_analysis.get('razao_curta', 'Sem razão')
+                            rec = pump_analysis.get('recomendacao', 'N/A')
+                            
+                            print(f"   🤖 Score Pump: {score}/100 - {reason}")
+                            
+                            if score >= 75:
+                                emoji_ai = "🧠"
+                                alert_msg_ai = (
+                                    f"{emoji_ai} *ALERTA DE SENTIMENTO*\n"
+                                    f"Score de Pump: *{score}/100*\n"
+                                    f"💡 {reason}\n"
+                                    f"🎯 Recomendação: {rec}\n"
+                                    f"\n📊 *Dados Sociais:*\n"
+                                    f"Menções 30min: {sentiment_data['menções_30min']}\n"
+                                    f"Sentimento: {sentiment_data['sentimento_atual']}/100"
+                                )
+                                send_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, f"{symbol}\n{alert_msg_ai}")
+                        
+                        if abs(price_z) >= 2.5 and volume_z >= 2.0:
+                            direction = "ALTA" if price_z > 0 else "BAIXA"
+                            emoji_extreme = "🔥" if price_z > 0 else "❄️"
+                            extreme_msg = (
+                                f"{emoji_extreme} *MOVIMENTO EXTREMO DE {direction}!*\n"
+                                f"Preço: `{price_z:+.1f}σ` | Volume: `{volume_z:+.1f}σ`\n"
+                                f"Preço atual: `${price:,.2f}`\n"
+                                f"Volume 24h: `${volume:,.0f}`\n"
+                                f"\n⚠️ *AÇÃO IMEDIATA RECOMENDADA*\n"
+                                f"Movimento {direction.lower()} muito forte detectado!"
+                            )
+                            send_message(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, f"{symbol}\n{extreme_msg}")
+                            print(f"   🔥 MOVIMENTO EXTREMO DE {direction}!")
+            
         
         if ALERT_STRATEGY in ['records', 'both']:
+
             stats_data = get_stats(S3_BUCKET, symbol)
             
             previous_high = stats_data.get('all_time_high', 0)

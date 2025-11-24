@@ -40,7 +40,6 @@ def get_alert_state(bucket: str, symbol: str) -> Dict:
         if local_file.exists():
             try:
                 state = json.loads(local_file.read_text())
-                # Adiciona campos novos se não existirem (migração)
                 for key in default_state:
                     if key not in state:
                         state[key] = default_state[key]
@@ -54,7 +53,6 @@ def get_alert_state(bucket: str, symbol: str) -> Dict:
     try:
         obj = s3.get_object(Bucket=bucket, Key=key)
         state = json.loads(obj['Body'].read().decode('utf-8'))
-        # Adiciona campos novos se não existirem (migração)
         for key in default_state:
             if key not in state:
                 state[key] = default_state[key]
