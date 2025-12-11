@@ -20,6 +20,9 @@ from src.config.services.statistics import (
 )
 from src.config.services.alert_state import get_alert_state, save_alert_state
 from src.config.services.sentiment_service import get_sentiment_data, calculate_pump_score
+from src.config.coin_mappings import get_coingecko_id
+import urllib.request
+import json
 
 
 
@@ -320,3 +323,43 @@ def lambda_handler(event, context):
     print("✅ Execução concluída com sucesso!")
     print(f"{'='*60}\n")
     return {"status": "ok"}
+
+
+def get_price_and_volume(symbol):
+    """
+    Busca preço e volume via CoinGecko, com fallback para CryptoCompare.
+    """
+    coin_id = get_coingecko_id(symbol)
+    url_cg = f"https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids={coin_id}"
+    headers = {'User-Agent': 'Mozilla/5.0 (compatible; CryptoMonitor/1.0)'}
+
+    try:
+        req = urllib.request.Request(url_cg, headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        if not data:
+            raise ValueError("CoinGecko retornou vazio")
+        market_data = data[0]
+        return {
+            'price': float(market_data["current_price"]),
+            'volume': float(market_data["total_volume"])
+        }
+    except Exception as e:
+        print(f"⚠️ Erro CoinGecko: {e} — tentando fallback...")
+
+        # Fallback: CryptoCompare
+        try:
+            url_cc = f"https://min-api.cryptocompare.com/data/pricemultifull?fsyms={symbol.replace('USDT','')}&tsyms=USD"
+            req_cc = urllib.request.Request(url_cc, headers=headers)
+            with urllib.request.urlopen(req_cc, timeout=10) as response:
+                data_cc = json.loads(response.read().decode("utf-8"))
+            coin = symbol.replace('USDT','')
+            price = data_cc["RAW"][coin]["USD"]["PRICE"]
+            volume = data_cc["RAW"][coin]["USD"]["TOTALVOLUME24H"]
+            return {
+                'price': float(price),
+                'volume': float(volume)
+            }
+        except Exception as e2:
+            print(f"❌ Erro no fallback CryptoCompare: {e2}")
+            return None

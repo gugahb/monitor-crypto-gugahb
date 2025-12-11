@@ -5,7 +5,7 @@ missing = [var for var in required_vars if not os.environ.get(var)]
 if missing:
     raise EnvironmentError(f"❌ Variáveis de ambiente faltando: {', '.join(missing)}")
 
-SYMBOLS = os.environ.get("SYMBOLS", "BTCUSDT").split(",")
+SYMBOLS = os.environ.get("SYMBOLS", "BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT").split(",")
 
 S3_BUCKET = os.environ["S3_BUCKET"]
 
@@ -25,7 +25,7 @@ ALERT_COOLDOWN_MINUTES = int(os.environ.get("ALERT_COOLDOWN_MINUTES", "30"))
 
 SIDEWAYS_THRESHOLD = float(os.environ.get("SIDEWAYS_THRESHOLD", "1.0"))
 SIDEWAYS_MIN_DURATION = int(os.environ.get("SIDEWAYS_MIN_DURATION", "30")) 
-SIDEWAYS_ALERT_INTERVAL = int(os.environ.get("SIDEWAYS_ALERT_INTERVAL", "30")) 
+SIDEWAYS_ALERT_INTERVAL = int(os.environ.get("SIDEWAYS_ALERT_INTERVAL", "120")) 
 BREAKOUT_MIN_PCT = float(os.environ.get("BREAKOUT_MIN_PCT", "1.0")) 
 
 def parse_alerts(raw: str):
